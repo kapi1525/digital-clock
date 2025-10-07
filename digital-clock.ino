@@ -1,39 +1,21 @@
-#include <stdint.h>
-#include <time.h>
-#include <array>
+#include <cstdint>
+#include <ctime>
 #include <cmath>
+#include <array>
 
 #include <esp_netif.h>
 #include <esp_netif_sntp.h>
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
 #include <WiFi.h>
-#include <Adafruit_NeoPixel.h>
 
+#include "shaders.hpp"
+#include "draw.hpp"
+#include "config.hpp"
 #include "res/imgs.hpp"
 
 
 
-static const int LED_PIN = 18;
-static const int LED_MATRIX_WIDTH = 32;
-static const int LED_MATRIX_HEIGHT = 8;
-static const int LED_COUNT = (LED_MATRIX_WIDTH * LED_MATRIX_HEIGHT);
-
-static const uint8_t BRIGHTNESS_MAX = 7;
-static const uint8_t BRIGHTNESS_AUTO = BRIGHTNESS_MAX;
-static const uint8_t BRIGHTNESS_USER_MAX = 6;
-static const uint8_t BRIGHTNESS_BASE = BRIGHTNESS_AUTO;
-
-static const gpio_num_t BUTTON_MAIN_PIN = GPIO_NUM_0;
-static const gpio_num_t BUTTON_L_PIN = GPIO_NUM_21;
-static const gpio_num_t BUTTON_R_PIN = GPIO_NUM_22;
-
-static const gpio_num_t PHOTORESISTOR_PIN = GPIO_NUM_1;
-
-static const char* WIFI_SSID = "CHANGE";
-static const char* WIFI_PASS = "ME";
-
-static const char* TIMEZONE = "CET-1CEST,M3.5.0,M10.5.0/3";
 
 
 
@@ -59,444 +41,6 @@ static struct State {
 
 
 
-Adafruit_NeoPixel& matrix() {
-  static Adafruit_NeoPixel m(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
-  return m;
-}
-
-
-
-int xy_to_pixel_index(int x, int y) {
-  if (x % 2) {
-    return (x * LED_MATRIX_HEIGHT) + LED_MATRIX_HEIGHT - 1 - y;
-  } else {
-    return (x * LED_MATRIX_HEIGHT) + y;
-  }
-}
-
-
-
-typedef uint32_t (*shader_func)(int x, int y);
-
-
-uint32_t color(uint8_t r, uint8_t g, uint8_t b) {
-  return matrix().Color(r, g, b);
-}
-
-uint32_t color_hsv(uint16_t h, uint8_t s = 255, uint8_t v = 255) {
-  return matrix().ColorHSV(h, s, v);
-}
-
-void set_pixel(int x, int y, uint32_t c) {
-  matrix().setPixelColor(xy_to_pixel_index(x, y), c);
-}
-
-uint32_t get_pixel(int x, int y) {
-  return matrix().getPixelColor(xy_to_pixel_index(x, y));
-}
-
-
-
-void fill_rect(int x, int y, int w, int h, uint32_t c) {
-  for (int ix = x; ix < x + w; ix++) {
-    for (int iy = y; iy < y + h; iy++) {
-      set_pixel(ix, iy, c);
-    }
-  }
-}
-
-void fill_rect_shaded(int x, int y, int w, int h, uint32_t (*shader)(int x, int y)) {
-  for (int ix = x; ix < x + w; ix++) {
-    for (int iy = y; iy < y + h; iy++) {
-      set_pixel(ix, iy, shader(ix, iy));
-    }
-  }
-}
-
-
-
-// On success 0, if index = -1 then returns number of glyphs, on error -1
-int draw_glyph(int index, int x, int y, uint32_t (*shader)(int x, int y)) {
-  static const std::array<uint8_t, 8 * (10 + 26)> GLYPHS = {
-    // 0
-    0b01110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // 1
-    0b00100,
-    0b01100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b01110,
-    // 2
-    0b01110,
-    0b10001,
-    0b00001,
-    0b00010,
-    0b00100,
-    0b01000,
-    0b10000,
-    0b11111,
-    // 3
-    0b01110,
-    0b10001,
-    0b00001,
-    0b00110,
-    0b00001,
-    0b00001,
-    0b10001,
-    0b01110,
-    // 4
-    0b10000,
-    0b10000,
-    0b10010,
-    0b11111,
-    0b00010,
-    0b00010,
-    0b00010,
-    0b00010,
-    // 5
-    0b11111,
-    0b10000,
-    0b11110,
-    0b00001,
-    0b00001,
-    0b00001,
-    0b10001,
-    0b01110,
-    // 6
-    0b01110,
-    0b10001,
-    0b10000,
-    0b11110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // 7
-    0b11111,
-    0b00001,
-    0b00010,
-    0b00100,
-    0b00100,
-    0b01000,
-    0b01000,
-    0b01000,
-    // 8
-    0b01110,
-    0b10001,
-    0b10001,
-    0b01110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // 9
-    0b01110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01111,
-    0b00001,
-    0b10001,
-    0b01110,
-    // A (10)
-    0b00100,
-    0b01010,
-    0b10001,
-    0b10001,
-    0b11111,
-    0b10001,
-    0b10001,
-    0b10001,
-    // B
-    0b11110,
-    0b10001,
-    0b10001,
-    0b11110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b11110,
-    // C
-    0b01110,
-    0b10001,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10001,
-    0b01110,
-    // D
-    0b11110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b11110,
-    // E
-    0b11111,
-    0b10000,
-    0b10000,
-    0b11110,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b11111,
-    // F
-    0b11111,
-    0b10000,
-    0b10000,
-    0b11110,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    // G
-    0b01110,
-    0b10001,
-    0b10000,
-    0b10111,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // H
-    0b10001,
-    0b10001,
-    0b10001,
-    0b11111,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    // I
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    // J
-    0b11111,
-    0b00001,
-    0b00001,
-    0b00001,
-    0b00001,
-    0b00001,
-    0b10001,
-    0b01110,
-    // K
-    0b10001,
-    0b10010,
-    0b10100,
-    0b11000,
-    0b10100,
-    0b10010,
-    0b10001,
-    0b10001,
-    // L
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b11111,
-    // M
-    0b10001,
-    0b11011,
-    0b10101,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    // N
-    0b10001,
-    0b11001,
-    0b10101,
-    0b10011,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    // O
-    0b01110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // P
-    0b11110,
-    0b10001,
-    0b10001,
-    0b11110,
-    0b10000,
-    0b10000,
-    0b10000,
-    0b10000,
-    // Q
-    0b01110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10101,
-    0b10011,
-    0b01111,
-    // R
-    0b11110,
-    0b10001,
-    0b10001,
-    0b11110,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    // S
-    0b01110,
-    0b10001,
-    0b10000,
-    0b01110,
-    0b00001,
-    0b00001,
-    0b10001,
-    0b01110,
-    // T
-    0b11111,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    // U
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01110,
-    // V
-    0b10001,
-    0b10001,
-    0b10001,
-    0b01010,
-    0b01010,
-    0b01010,
-    0b00100,
-    0b00100,
-    // W
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10001,
-    0b10101,
-    0b10101,
-    0b10101,
-    0b01010,
-    // X
-    0b10001,
-    0b01010,
-    0b01010,
-    0b00100,
-    0b01010,
-    0b01010,
-    0b10001,
-    0b10001,
-    // Y
-    0b10001,
-    0b10001,
-    0b01010,
-    0b01010,
-    0b00100,
-    0b00100,
-    0b00100,
-    0b00100,
-    // Z (10 + 26)
-    0b11111,
-    0b00001,
-    0b00010,
-    0b00100,
-    0b01000,
-    0b10000,
-    0b10000,
-    0b11111,
-  };
-
-  int char_w = 5;
-  int char_h = 8;
-
-  if (index < 0) {
-    return std::floor(GLYPHS.size() / 8);
-  }
-  else if (index >= GLYPHS.size()) {
-    return -1;
-  }
-
-  for (int j = 0; j < char_h; j++) {
-    for (int i = 0; i < char_w; i++) {
-      if (GLYPHS[8 * index + j] & (1 << char_w - i - 1)) {
-        set_pixel(i + x, j + y, shader(i + x, j + y));
-      }
-    }
-  }
-
-  return 0;
-}
-
-void draw_char(char c, int x, int y, uint32_t (*shader)(int x, int y)) {
-  size_t char_index = INT_MAX;
-
-  if (c >= '0' && c <= '9') {
-    char_index = c - '0';
-  }
-  else if (c >= 'A' && c <= 'Z') {
-    char_index = c - 'A' + 10;
-  }
-
-  auto ret = draw_glyph(char_index, x, y, shader);
-
-  if (ret == -1) {
-    Serial.printf("Unsupported char: '%c'!\n", c);
-  }
-}
-
-void draw_digit(int d, int x, int y, uint32_t (*shader)(int x, int y)) {
-  draw_char('0' + d, x, y, shader);
-}
-
-
-
-void blit_img(int target_x, int target_y, int w, int h, const unsigned char img[]) {
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      set_pixel(target_x + x, target_y + y, color(img[(x + (y * w)) * 3], img[((x + (y * w)) * 3) + 1], img[((x + (y * w)) * 3) + 2]));
-    }
-  }
-}
-
-
 void draw_clock(float delta, ClockStyle style) {
   time_t t = time(nullptr);
   tm *time_ptr = localtime(&t);
@@ -505,45 +49,7 @@ void draw_clock(float delta, ClockStyle style) {
   int min = time_ptr->tm_min;
   bool tick = time_ptr->tm_sec % 2;
 
-  static time_t hue;
-  hue = t;
-  shader_func shader_hue_shift = [](int x, int y) -> uint32_t {
-    return color_hsv((hue + (x << 7)) % UINT16_MAX);
-  };
-
-  shader_func shader_hue_shift_dim = [](int x, int y) -> uint32_t {
-    return color_hsv((hue + (x << 7)) % UINT16_MAX, 255, 127);
-  };
-
-  shader_func shader_white = [](int x, int y) -> uint32_t {
-    return color(255, 255, 255);
-  };
-
-  shader_func shader_red = [](int x, int y) -> uint32_t {
-    return color(255, 0, 0);
-  };
-
-  shader_func shader_yellow = [](int x, int y) -> uint32_t {
-    return color(255, 255, 0);
-  };
-
-  shader_func shader_green = [](int x, int y) -> uint32_t {
-    return color(0, 255, 0);
-  };
-
-  shader_func shader_turquoise = [](int x, int y) -> uint32_t {
-    return color(0, 255, 255);
-  };
-
-  shader_func shader_blue = [](int x, int y) -> uint32_t {
-    return color(0, 0, 255);
-  };
-
-  shader_func shader_purple = [](int x, int y) -> uint32_t {
-    return color(255, 0, 255);
-  };
-
-  shader_func shader;
+  shader_func_t shader;
 
   switch (style) {
     case ClockStyle::lgbt_digits:
@@ -601,27 +107,9 @@ void draw_clock(float delta, ClockStyle style) {
 
 
 
-void draw_char_test(float delta) {
-  static const int glyphs = draw_glyph(-1, 0, 0, nullptr);
-  static float offset = -LED_MATRIX_WIDTH;
-
-  if (offset > (6 * glyphs)) {
-    offset = -LED_MATRIX_WIDTH;
-  }
-
-
-  for (int i = 0; i < glyphs; i++) {
-    draw_glyph(i, i * 6 - floor(offset), 0, [](int x, int y) { return color(255, 255, 255); });
-  }
-
-  offset += delta * 16;
-}
-
-
-
 void update_brightness(State &state) {
   if (state.brightness != BRIGHTNESS_AUTO) {
-    matrix().setBrightness(1 << state.brightness);
+    display_set_brightness(1 << state.brightness);
     return;
   }
   // Auto brightness
@@ -634,21 +122,22 @@ void update_brightness(State &state) {
   uint16_t value = std::min(std::max(analogRead(PHOTORESISTOR_PIN), low_treshhold), high_treshhold);
 
   uint8_t new_brightness = 1 << (int)(((value - low_treshhold) / (float)high_treshhold) * BRIGHTNESS_USER_MAX);
-  matrix().setBrightness(new_brightness);
+  display_set_brightness(new_brightness);
 }
 
 
 
 void draw(float delta, State &state) {
-  matrix().clear();
+  display_clear();
   draw_clock(delta, state.clock_style);
-//   draw_char_test(delta);
+//   draw_glyph_test(delta);
+  // draw_text("HEJ", 0, 0, shader_hue_shift);
 
   if (state.syncing_time) {
     set_pixel(31, 7, color(0, 255, 0));
   }
 
-  matrix().show();
+  display_show();
 }
 
 
@@ -748,7 +237,7 @@ void setup() {
     Serial.println("Failed to set timzezone");
   }
 
-  if (matrix().begin() != true) {
+  if (display_init() != true) {
     Serial.println("Led matrix begin() failed");
   }
   // matrix().setBrightness(1 << BASE_BRIGHTNESS);

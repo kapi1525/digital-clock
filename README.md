@@ -10,5 +10,5 @@ Another button is used to change brightness. There is also a auto brightness set
 Used seeed xiao esp32-c6 and [this](https://botland.com.pl/wyswietlacze-segmentowe-i-matryce-led/6185-elastyczna-matryca-8x32-256-led-rgb-ws2812b-indywidualnie-adresowane-5904422374952.html) random 32x8 rgb led matrix.
 Other esp variants can be used but you may need to change the pins used.
 
-All pins and other constants (wifi passowrd etc...) are at the top of the .ino file.
+All pins and other constants (wifi passowrd etc...) are configured in `config.cpp`.
 You should also change the time zone, tz codes can be found here: https://github.com/nayarsystems/posix_tz_db/blob/fb5fa340cfa7599467358a347e5d6e6724d92bb2/zones.csv.
